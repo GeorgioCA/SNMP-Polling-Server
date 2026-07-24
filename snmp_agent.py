@@ -62,14 +62,17 @@ class ReportFileHandler(FileSystemEventHandler):
             parse_csv_file(event.src_path)
 
 class DynamicMibController(instrum.AbstractMibInstrumController):
-    def readVars(self, varBinds, acInfo=(None, None)):
+    def read_variables(self, *varBinds, **context):
         res = []
-        for oid, val in varBinds:
+        for oid_val in varBinds:
+            oid, val = oid_val[0], oid_val[1]
             oid_str = str(oid)
+            logging.debug(f"read_variables: oid={oid_str!r}")
             if oid_str in OID_MAP:
                 value_str = OID_MAP[oid_str]
                 res.append((oid, v2c.OctetString(value_str)))
             else:
+                logging.debug(f"read_variables: OID {oid_str!r} not found")
                 res.append((oid, exval.noSuchInstance))
         return res
 
@@ -90,6 +93,13 @@ async def main():
 
     snmp_engine = engine.SnmpEngine()
 
+    # Pre-load MIBs needed for SNMPv3 user and VACM setup
+    mib_builder = snmp_engine.get_mib_builder()
+    mib_builder.load_modules('SNMP-VIEW-BASED-ACM-MIB')
+    mib_builder.load_modules('SNMP-USER-BASED-SM-MIB')
+    mib_builder.load_modules('PYSNMP-USM-MIB')
+    mib_builder.load_modules('__PYSNMP-USM-MIB')
+
     config.add_transport(
         snmp_engine,
         udp.DOMAIN_NAME,
@@ -107,12 +117,12 @@ async def main():
 
     config.add_context(snmp_engine, "")
     config.add_vacm_group(snmp_engine, "v3group", 3, "snmpv3user")
-    config.add_vacm_access(snmp_engine, "v3group", "", 3, "authPriv", "exact", "readView", "", "")
+    config.add_vacm_access(snmp_engine, "v3group", "", 3, 3, "exact", "readView", "", "")
     config.add_vacm_view(snmp_engine, "readView", "included", BASE_OID, "")
 
     snmp_context = context.SnmpContext(snmp_engine)
     cmdrsp.GetCommandResponder(snmp_engine, snmp_context)
-    snmp_context.getMibInstrum = lambda ctxName="": DynamicMibController()
+    snmp_context.get_mib_instrum = lambda ctxName=b"": DynamicMibController()
 
     logging.info("SNMPv3 Server listening on UDP 0.0.0.0:10161...")
 
