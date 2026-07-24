@@ -90,25 +90,25 @@ async def main():
 
     snmp_engine = engine.SnmpEngine()
 
-    config.addTransport(
+    config.add_transport(
         snmp_engine,
-        udp.domainName,
-        udp.UdpTransport().openServerMode(("0.0.0.0", 10161))
+        udp.DOMAIN_NAME,
+        udp.UdpTransport().open_server_mode(("0.0.0.0", 10161))
     )
 
-    config.addV3User(
+    config.add_v3_user(
         snmp_engine,
         userName="snmpv3user",
-        authProtocol=config.usmHMACSHAAuthProtocol,
+        authProtocol=config.USM_AUTH_HMAC96_SHA,
         authKey="AuthSecretKey123",
-        privProtocol=config.usmAesCfb128Protocol,
+        privProtocol=config.USM_PRIV_CFB128_AES,
         privKey="PrivSecretKey123"
     )
 
-    config.addContext(snmp_engine, "")
-    config.addVacmGroup(snmp_engine, "v3group", 3, "snmpv3user")
-    config.addVacmAccess(snmp_engine, "v3group", "", 3, "authPriv", "exact", "readView", "", "")
-    config.addVacmView(snmp_engine, "readView", "included", BASE_OID, "")
+    config.add_context(snmp_engine, "")
+    config.add_vacm_group(snmp_engine, "v3group", 3, "snmpv3user")
+    config.add_vacm_access(snmp_engine, "v3group", "", 3, "authPriv", "exact", "readView", "", "")
+    config.add_vacm_view(snmp_engine, "readView", "included", BASE_OID, "")
 
     snmp_context = context.SnmpContext(snmp_engine)
     cmdrsp.GetCommandResponder(snmp_engine, snmp_context)
