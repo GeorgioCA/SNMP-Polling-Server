@@ -11,7 +11,16 @@ services:
       - "10161:10161/udp"
     expose:
       - "8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.snmp-agent.loadbalancer.server.port=8000"
+    networks:
+      - coolify
     volumes:
       - ./incoming_reports:/app/incoming_reports
     environment:
       - PYTHONUNBUFFERED=1
+
+networks:
+  coolify:
+    external: true
