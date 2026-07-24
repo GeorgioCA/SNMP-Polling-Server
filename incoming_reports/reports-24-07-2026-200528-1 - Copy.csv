@@ -1,0 +1,22 @@
+﻿MSB_Trends
+slot:/Services/ReportService/MSB_Trends
+24-Jul-26 4:00 PM EDT
+
+Main Switch Board,Value
+Volts_Line_AB,611.31
+Volts_Line_BC,612.06
+Volts_Line_CA,610.74
+Volts_Line_avgLL,611.37
+Volts_Line_AN,352.14
+Volts_Line_BN,353.66
+Volts_Line_CN,352.99
+Volts_Line_avgLN,352.93
+Amps_IA,572.32
+Amps_IB,597.30
+Amps_IC,565.10
+Amps_IN,5.51
+Amps_Iavg,578.24
+RealPower,585565.69
+ApparentPower,611755.88
+ReactivePower,176690.03
+Frequency,59.99

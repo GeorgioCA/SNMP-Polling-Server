@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  snmp-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: snmpv3_telemetry_agent
+    restart: unless-stopped
+    ports:
+      - "10161:10161/udp"
+    volumes:
+      - ./incoming_reports:/app/incoming_reports
+    environment:
+      - PYTHONUNBUFFERED=1
