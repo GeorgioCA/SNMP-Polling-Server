@@ -12,8 +12,8 @@ services:
     expose:
       - "8000"
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.snmp-agent.loadbalancer.server.port=8000"
+      - "caddy=${COOLIFY_FQDN}"
+      - "caddy.reverse_proxy={{upstreams 8000}}"
     networks:
       - coolify
     volumes:
