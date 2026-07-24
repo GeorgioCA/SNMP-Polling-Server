@@ -76,11 +76,37 @@ class DynamicMibController(instrum.AbstractMibInstrumController):
                 res.append((oid, exval.noSuchInstance))
         return res
 
+SAMPLE_CSV = """Main Switch Board,Value
+Volts_Line_AB,120.5
+Volts_Line_BC,119.8
+Volts_Line_CA,121.1
+Volts_Line_avgLL,120.5
+Volts_Line_AN,69.3
+Volts_Line_BN,69.1
+Volts_Line_CN,69.5
+Volts_Line_avgLN,69.3
+Amps_IA,15.2
+Amps_IB,14.8
+Amps_IC,15.1
+Amps_IN,0.3
+Amps_Iavg,15.0
+RealPower,5400
+ApparentPower,5600
+ReactivePower,1200
+Frequency,60.0
+"""
+
 def load_most_recent_file(folder):
     csv_files = glob.glob(os.path.join(folder, "*.csv"))
     if csv_files:
         latest_file = max(csv_files, key=os.path.getmtime)
         parse_csv_file(latest_file)
+    else:
+        logging.warning(f"No CSV files found in {folder}. Creating sample data.")
+        sample_path = os.path.join(folder, "sample.csv")
+        with open(sample_path, "w") as f:
+            f.write(SAMPLE_CSV)
+        parse_csv_file(sample_path)
 
 async def main():
     os.makedirs(WATCH_DIRECTORY, exist_ok=True)
