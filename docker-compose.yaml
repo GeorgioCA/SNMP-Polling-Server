@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     ports:
       - "10161:10161/udp"
+      - "8000:8000"
     volumes:
       - ./incoming_reports:/app/incoming_reports
     environment:

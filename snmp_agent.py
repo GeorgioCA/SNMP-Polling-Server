@@ -3,6 +3,7 @@ import csv
 import glob
 import logging
 import asyncio
+from datetime import datetime
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -11,6 +12,9 @@ from pysnmp.entity.rfc3413 import cmdrsp, context
 from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.proto.api import v2c
 from pysnmp.smi import instrum, exval
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import JSONResponse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -96,6 +100,51 @@ ReactivePower,1200
 Frequency,60.0
 """
 
+# ── FastAPI app ──────────────────────────────────────────────────────────────
+
+api = FastAPI(title="SNMP Agent", version="1.0.0")
+
+
+@api.get("/health")
+async def health():
+    """Health check."""
+    return {"status": "ok", "metrics_loaded": len(METRICS_CACHE), "watch_dir": WATCH_DIRECTORY}
+
+
+@api.get("/metrics")
+async def list_metrics():
+    """List all currently loaded metrics."""
+    return {
+        "count": len(METRICS_CACHE),
+        "metrics": {k: {"value": v, "oid": METRIC_INDEX_MAP[k]} for k, v in METRICS_CACHE.items()},
+        "oid_map": dict(OID_MAP),
+    }
+
+
+@api.post("/upload")
+async def upload_csv(file: UploadFile = File(...)):
+    """Upload a CSV report. Replaces existing data with the new file's metrics."""
+    if not file.filename or not file.filename.endswith(".csv"):
+        raise HTTPException(400, "Only .csv files are accepted")
+
+    os.makedirs(WATCH_DIRECTORY, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    save_path = os.path.join(WATCH_DIRECTORY, f"upload-{timestamp}-{file.filename}")
+
+    content = await file.read()
+    with open(save_path, "wb") as f:
+        f.write(content)
+
+    # Parse directly so the caller gets immediate feedback
+    parse_csv_file(save_path)
+
+    return {
+        "status": "ok",
+        "file": file.filename,
+        "saved_as": save_path,
+        "metrics_loaded": len(METRICS_CACHE),
+    }
+
 def load_most_recent_file(folder):
     csv_files = glob.glob(os.path.join(folder, "*.csv"))
     if csv_files:
@@ -160,7 +209,16 @@ async def main():
         observer.join()
 
 if __name__ == "__main__":
+    import uvicorn
+
+    # Run SNMP agent + FastAPI in the same event loop
+    uvicorn_cfg = uvicorn.Config(api, host="0.0.0.0", port=8000, log_config=None)
+    server = uvicorn.Server(uvicorn_cfg)
+
+    async def run_all():
+        await asyncio.gather(main(), server.serve())
+
     try:
-        asyncio.run(main())
+        asyncio.run(run_all())
     except KeyboardInterrupt:
-        logging.info("Shutting down SNMP Server.")
+        logging.info("Shutting down.")
