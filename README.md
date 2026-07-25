@@ -9,6 +9,7 @@ An automated, lightweight SNMPv3 command responder written in Python. This servi
 ```
 .
 ├── snmp_agent.py               # Main Python SNMPv3 server, API and file watcher
+├── templates/index.html        # Web dashboard (upload + live OID table)
 ├── requirements.txt            # Pinned Python dependencies
 ├── run.sh                      # Quick start script (creates venv, installs deps, runs server)
 ├── Dockerfile                  # Container definition
@@ -165,6 +166,7 @@ Assignments are persisted to `incoming_reports/oid_registry.json` (volume-mounte
 
 | Endpoint      | Method | Auth                | Description                          |
 | ------------- | ------ | ------------------- | ------------------------------------ |
+| `/`           | GET    | none                | Web dashboard: CSV upload, current file, live OID table |
 | `/health`     | GET    | none                | Service status and metric count      |
 | `/metrics`    | GET    | none                | Dump currently served metrics/OIDs   |
 | `/upload`     | POST   | `X-API-Key` header* | Upload a CSV report (multipart form) |

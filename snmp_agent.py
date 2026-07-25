@@ -18,7 +18,8 @@ from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.proto.api import v2c
 from pysnmp.smi import instrum, exval
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, Depends, Header
+from fastapi.templating import Jinja2Templates
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -83,6 +84,7 @@ METRIC_OID_MAP = {}  # metric name -> oid str (fixed + dynamic)
 OID_MAP = {}
 OID_LIST = []  # [(oid_tuple, oid_str)], sorted — used for GETNEXT/GETBULK
 OID_REGISTRY = {}  # dynamic metric name -> oid str, persisted to disk
+CURRENT_FILE = None  # path of the CSV whose data is currently being served
 
 
 def load_oid_registry():
@@ -196,11 +198,12 @@ def parse_csv_file(file_path, attempts=5, delay=0.5):
     if registry_changed:
         save_oid_registry()
 
-    global METRICS_CACHE, METRIC_OID_MAP, OID_MAP, OID_LIST
+    global METRICS_CACHE, METRIC_OID_MAP, OID_MAP, OID_LIST, CURRENT_FILE
     METRICS_CACHE = {m: v for m, v in metrics.items() if m in metric_oids}
     METRIC_OID_MAP = metric_oids
     OID_MAP = {metric_oids[m]: v for m, v in METRICS_CACHE.items()}
     OID_LIST = sorted((_oid_tuple(o), o) for o in OID_MAP)
+    CURRENT_FILE = file_path
     logging.info(f"Loaded {len(METRICS_CACHE)} metrics from {os.path.basename(file_path)} (previous data replaced)")
     return len(METRICS_CACHE)
 
@@ -273,7 +276,16 @@ Frequency,60.0
 
 api = FastAPI(title="SNMP Agent", version="1.1.0")
 
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
 _SAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+
+
+@api.get("/", include_in_schema=False)
+async def dashboard(request: Request):
+    """Web dashboard: CSV upload + live OID table."""
+    return templates.TemplateResponse(request, "index.html")
 
 
 async def require_api_key(x_api_key: Optional[str] = Header(default=None)):
@@ -284,7 +296,12 @@ async def require_api_key(x_api_key: Optional[str] = Header(default=None)):
 @api.get("/health")
 async def health():
     """Health check."""
-    return {"status": "ok", "metrics_loaded": len(METRICS_CACHE), "watch_dir": WATCH_DIRECTORY}
+    return {
+        "status": "ok",
+        "metrics_loaded": len(METRICS_CACHE),
+        "watch_dir": WATCH_DIRECTORY,
+        "source_file": CURRENT_FILE,
+    }
 
 
 @api.get("/metrics")
@@ -292,6 +309,7 @@ async def list_metrics():
     """List all currently loaded metrics."""
     return {
         "count": len(METRICS_CACHE),
+        "source_file": CURRENT_FILE,
         "metrics": {k: {"value": v, "oid": METRIC_OID_MAP.get(k)} for k, v in METRICS_CACHE.items()},
         "oid_map": dict(OID_MAP),
         "dynamic_registry": dict(OID_REGISTRY),
