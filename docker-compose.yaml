@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   snmp-agent:
     build:
@@ -9,18 +7,14 @@ services:
     restart: unless-stopped
     ports:
       - "10161:10161/udp"
-    expose:
-      - "8000"
-    labels:
-      - "caddy=${COOLIFY_FQDN}"
-      - "caddy.reverse_proxy={{upstreams 8000}}"
-    networks:
-      - coolify
+      - "8000:8000"
     volumes:
       - ./incoming_reports:/app/incoming_reports
     environment:
       - PYTHONUNBUFFERED=1
-
-networks:
-  coolify:
-    external: true
+      # Set these in production (see README → Configuration):
+      # - API_KEY=change-me                # required for POST /upload
+      # - SNMPV3_USER=snmpv3user
+      # - SNMPV3_AUTH_KEY=AuthSecretKey123
+      # - SNMPV3_PRIV_KEY=PrivSecretKey123
+      # - SNMP_VALUE_SYNTAX=gauge          # numeric values as Gauge32 x100

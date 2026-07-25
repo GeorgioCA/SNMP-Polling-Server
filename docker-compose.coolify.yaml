@@ -1,0 +1,16 @@
+# Coolify deployment override — use together with the base file:
+#   docker compose -f docker-compose.yaml -f docker-compose.coolify.yaml up -d
+#
+# Routes the FastAPI port through Caddy on the external Coolify network.
+# IMPORTANT: set API_KEY in the environment — /upload is otherwise public.
+services:
+  snmp-agent:
+    labels:
+      - "caddy=${COOLIFY_FQDN}"
+      - "caddy.reverse_proxy={{upstreams 8000}}"
+    networks:
+      - coolify
+
+networks:
+  coolify:
+    external: true
