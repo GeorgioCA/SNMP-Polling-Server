@@ -2,6 +2,7 @@ import os
 import re
 import csv
 import glob
+import json
 import time
 import logging
 import asyncio
@@ -63,12 +64,69 @@ METRIC_INDEX_MAP = {
     "Frequency": f"{BASE_OID}.4.1.0",
 }
 
+# ── Dynamic OIDs ─────────────────────────────────────────────────────────────
+# Metrics found in a CSV that are not in METRIC_INDEX_MAP are auto-assigned an
+# OID under {BASE_OID}.{DYNAMIC_BRANCH}.N.0. Assignments are persisted in a
+# registry file (first-come-first-served), so a metric keeps its OID across
+# restarts and future uploads — NMS configurations stay valid.
+DYNAMIC_BRANCH = int(os.environ.get("DYNAMIC_BRANCH", "100"))
+MAX_DYNAMIC_OIDS = int(os.environ.get("MAX_DYNAMIC_OIDS", "1000"))
+OID_REGISTRY_PATH = os.environ.get(
+    "OID_REGISTRY_PATH", os.path.join(WATCH_DIRECTORY, "oid_registry.json")
+)
+
 # Served data. parse_csv_file() swaps these references atomically, so readers
 # (SNMP event loop) always see a consistent snapshot even though the file
 # watcher runs on its own thread.
 METRICS_CACHE = {}
+METRIC_OID_MAP = {}  # metric name -> oid str (fixed + dynamic)
 OID_MAP = {}
 OID_LIST = []  # [(oid_tuple, oid_str)], sorted — used for GETNEXT/GETBULK
+OID_REGISTRY = {}  # dynamic metric name -> oid str, persisted to disk
+
+
+def load_oid_registry():
+    global OID_REGISTRY
+    try:
+        with open(OID_REGISTRY_PATH, "r", encoding="utf-8") as f:
+            OID_REGISTRY = json.load(f)
+    except FileNotFoundError:
+        OID_REGISTRY = {}
+        return
+    except (json.JSONDecodeError, OSError) as e:
+        logging.error(f"Cannot read {OID_REGISTRY_PATH}: {e}; starting with empty registry")
+        OID_REGISTRY = {}
+        return
+    # Drop stale entries if BASE_OID / DYNAMIC_BRANCH changed
+    prefix = f"{BASE_OID}.{DYNAMIC_BRANCH}."
+    stale = [m for m, o in OID_REGISTRY.items() if not o.startswith(prefix)]
+    for m in stale:
+        logging.warning(f"Dropping stale dynamic OID for {m!r} (registry prefix changed)")
+        del OID_REGISTRY[m]
+    if OID_REGISTRY:
+        logging.info(f"Loaded {len(OID_REGISTRY)} dynamic OID assignments from {OID_REGISTRY_PATH}")
+
+
+def save_oid_registry():
+    tmp_path = OID_REGISTRY_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(OID_REGISTRY, f, indent=2, sort_keys=True)
+    os.replace(tmp_path, OID_REGISTRY_PATH)
+
+
+def _dynamic_oid(metric):
+    """Return (oid, registry_changed) for a non-fixed metric."""
+    if metric in OID_REGISTRY:
+        return OID_REGISTRY[metric], False
+    if len(OID_REGISTRY) >= MAX_DYNAMIC_OIDS:
+        return None, False
+    used = {int(o.rsplit(".", 2)[-2]) for o in OID_REGISTRY.values()}
+    arc = 1
+    while arc in used:
+        arc += 1
+    OID_REGISTRY[metric] = f"{BASE_OID}.{DYNAMIC_BRANCH}.{arc}.0"
+    logging.info(f"Assigned dynamic OID {OID_REGISTRY[metric]} to new metric {metric!r}")
+    return OID_REGISTRY[metric], True
 
 
 def _oid_tuple(oid_str):
@@ -92,9 +150,10 @@ def parse_csv_file(file_path, attempts=5, delay=0.5):
     """Parse a CSV report and atomically REPLACE the served metrics.
 
     Each report is a full snapshot: metrics absent from the new file stop
-    being served instead of going stale. Retries briefly when nothing is
-    parsed, because watchdog fires on_created before writers finish.
-    Returns the number of metrics loaded.
+    being served instead of going stale. Unknown metrics are auto-assigned
+    persistent OIDs under the dynamic branch (see load_oid_registry).
+    Retries briefly when nothing is parsed, because watchdog fires
+    on_created before writers finish. Returns the number of metrics loaded.
     """
     metrics = {}
     for attempt in range(attempts):
@@ -102,10 +161,14 @@ def parse_csv_file(file_path, attempts=5, delay=0.5):
         try:
             with open(file_path, "r", encoding="utf-8-sig") as f:
                 for row in csv.reader(f):
-                    if len(row) == 2:
-                        metric, value = row[0].strip(), row[1].strip()
-                        if metric in METRIC_INDEX_MAP:
-                            metrics[metric] = value
+                    if len(row) != 2:
+                        continue
+                    metric, value = row[0].strip(), row[1].strip()
+                    if not metric or not value:
+                        continue
+                    if value.lower() == "value":
+                        continue  # header row, e.g. "Main Switch Board,Value"
+                    metrics[metric] = value
         except OSError as e:
             logging.warning(f"Cannot read {file_path}: {e}")
         if metrics:
@@ -114,16 +177,32 @@ def parse_csv_file(file_path, attempts=5, delay=0.5):
             time.sleep(delay)
 
     if not metrics:
-        logging.error(f"No known metrics parsed from {file_path}; keeping previous data")
+        logging.error(f"No metrics parsed from {file_path}; keeping previous data")
         return 0
 
-    global METRICS_CACHE, OID_MAP, OID_LIST
-    oid_map = {METRIC_INDEX_MAP[m]: v for m, v in metrics.items()}
-    METRICS_CACHE = metrics
-    OID_MAP = oid_map
-    OID_LIST = sorted((_oid_tuple(o), o) for o in oid_map)
-    logging.info(f"Loaded {len(metrics)} metrics from {os.path.basename(file_path)} (previous data replaced)")
-    return len(metrics)
+    # Resolve OIDs: fixed map first, dynamic registry for everything else
+    metric_oids = {}
+    registry_changed = False
+    for m in metrics:
+        if m in METRIC_INDEX_MAP:
+            metric_oids[m] = METRIC_INDEX_MAP[m]
+        else:
+            oid, changed = _dynamic_oid(m)
+            registry_changed |= changed
+            if oid is not None:
+                metric_oids[m] = oid
+            else:
+                logging.warning(f"Dynamic OID limit ({MAX_DYNAMIC_OIDS}) reached; skipping metric {m!r}")
+    if registry_changed:
+        save_oid_registry()
+
+    global METRICS_CACHE, METRIC_OID_MAP, OID_MAP, OID_LIST
+    METRICS_CACHE = {m: v for m, v in metrics.items() if m in metric_oids}
+    METRIC_OID_MAP = metric_oids
+    OID_MAP = {metric_oids[m]: v for m, v in METRICS_CACHE.items()}
+    OID_LIST = sorted((_oid_tuple(o), o) for o in OID_MAP)
+    logging.info(f"Loaded {len(METRICS_CACHE)} metrics from {os.path.basename(file_path)} (previous data replaced)")
+    return len(METRICS_CACHE)
 
 
 class ReportFileHandler(FileSystemEventHandler):
@@ -213,8 +292,9 @@ async def list_metrics():
     """List all currently loaded metrics."""
     return {
         "count": len(METRICS_CACHE),
-        "metrics": {k: {"value": v, "oid": METRIC_INDEX_MAP[k]} for k, v in METRICS_CACHE.items()},
+        "metrics": {k: {"value": v, "oid": METRIC_OID_MAP.get(k)} for k, v in METRICS_CACHE.items()},
         "oid_map": dict(OID_MAP),
+        "dynamic_registry": dict(OID_REGISTRY),
     }
 
 
@@ -268,6 +348,7 @@ def load_most_recent_file(folder):
 
 async def main():
     os.makedirs(WATCH_DIRECTORY, exist_ok=True)
+    load_oid_registry()
     load_most_recent_file(WATCH_DIRECTORY)
 
     if not API_KEY:

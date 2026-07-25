@@ -73,6 +73,9 @@ docker compose -f docker-compose.coolify.yaml up --build -d
 | `WATCH_DIRECTORY`    | `./incoming_reports`  | Directory watched for CSV reports                                  |
 | `SNMP_VALUE_SYNTAX`  | `string`              | `string` = OctetString (`"611.31"`); `gauge` = Gauge32 scaled ×100 (`61131`) so NMS tools can graph values natively |
 | `MAX_UPLOAD_BYTES`   | `10485760`            | Max accepted upload size                                           |
+| `DYNAMIC_BRANCH`     | `100`                 | Sub-branch under `BASE_OID` for auto-assigned OIDs of unknown metrics |
+| `MAX_DYNAMIC_OIDS`   | `1000`                | Maximum number of dynamically assigned metric OIDs                 |
+| `OID_REGISTRY_PATH`  | `./incoming_reports/oid_registry.json` | Where dynamic OID assignments are persisted       |
 
 Each uploaded/dropped CSV is a **full snapshot**: metrics missing from the newest file stop being served rather than going stale.
 
@@ -139,6 +142,22 @@ All metrics are served under `BASE_OID` (default `1.3.6.1.4.1.99999`) as scalar 
 | `Frequency`         | `1.3.6.1.4.1.99999.4.1.0`     | Line frequency (Hz)            |
 
 Values are `OctetString` by default (e.g. `"611.31"`). With `SNMP_VALUE_SYNTAX=gauge` they are served as `Gauge32` scaled ×100 (e.g. `61131`).
+
+### Dynamic OIDs
+
+Metrics found in a CSV that are **not** in the fixed table above are automatically assigned an OID under the dynamic branch:
+
+```
+{BASE_OID}.100.{N}.0     N = 1, 2, 3, ... (first-come-first-served)
+```
+
+Assignments are persisted to `incoming_reports/oid_registry.json` (volume-mounted, so it survives container rebuilds), which means:
+
+- A metric keeps the **same OID forever**, across restarts and future uploads — your NMS configuration stays valid.
+- Uploading a CSV with a brand-new metric (e.g. `PowerFactor,0.97`) makes it immediately queryable and walkable — no code change or restart needed.
+- Rows whose value column reads `Value` are treated as headers and skipped.
+- Discover current assignments via `snmpwalk` on the base OID, `GET /metrics`, or the registry file itself.
+- Limits: up to `MAX_DYNAMIC_OIDS` (default 1000) dynamic metrics; the branch number is configurable via `DYNAMIC_BRANCH`.
 
 ---
 
