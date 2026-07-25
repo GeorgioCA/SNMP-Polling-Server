@@ -1,9 +1,13 @@
 import os
+import re
 import csv
 import glob
+import time
 import logging
 import asyncio
 from datetime import datetime
+from typing import Optional
+
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -13,72 +17,158 @@ from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.proto.api import v2c
 from pysnmp.smi import instrum, exval
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-WATCH_DIRECTORY = "./incoming_reports"
-BASE_OID = "1.3.6.1.4.1.99999"
+# ── Configuration (environment overrides) ────────────────────────────────────
 
-METRICS_CACHE = {}
-OID_MAP = {}
+WATCH_DIRECTORY = os.environ.get("WATCH_DIRECTORY", "./incoming_reports")
+BASE_OID = os.environ.get("BASE_OID", "1.3.6.1.4.1.99999")
+SNMP_PORT = int(os.environ.get("SNMP_PORT", "10161"))
+API_PORT = int(os.environ.get("API_PORT", "8000"))
+
+SNMPV3_USER = os.environ.get("SNMPV3_USER", "snmpv3user")
+SNMPV3_AUTH_KEY = os.environ.get("SNMPV3_AUTH_KEY", "AuthSecretKey123")
+SNMPV3_PRIV_KEY = os.environ.get("SNMPV3_PRIV_KEY", "PrivSecretKey123")
+
+# API key required on POST /upload (header: X-API-Key).
+# If unset, /upload is UNAUTHENTICATED — only acceptable for local development.
+API_KEY = os.environ.get("API_KEY")
+
+# Value syntax served over SNMP:
+#   "string" (default) -> OctetString, e.g. "611.31" (backwards compatible)
+#   "gauge"            -> Gauge32 scaled x100, e.g. 61131 (NMS-graphable)
+VALUE_SYNTAX = os.environ.get("SNMP_VALUE_SYNTAX", "string").lower()
+
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 
 METRIC_INDEX_MAP = {
-    "Volts_Line_AB": "1.3.6.1.4.1.99999.1.1.0",
-    "Volts_Line_BC": "1.3.6.1.4.1.99999.1.2.0",
-    "Volts_Line_CA": "1.3.6.1.4.1.99999.1.3.0",
-    "Volts_Line_avgLL": "1.3.6.1.4.1.99999.1.4.0",
-    "Volts_Line_AN": "1.3.6.1.4.1.99999.1.5.0",
-    "Volts_Line_BN": "1.3.6.1.4.1.99999.1.6.0",
-    "Volts_Line_CN": "1.3.6.1.4.1.99999.1.7.0",
-    "Volts_Line_avgLN": "1.3.6.1.4.1.99999.1.8.0",
-    "Amps_IA": "1.3.6.1.4.1.99999.2.1.0",
-    "Amps_IB": "1.3.6.1.4.1.99999.2.2.0",
-    "Amps_IC": "1.3.6.1.4.1.99999.2.3.0",
-    "Amps_IN": "1.3.6.1.4.1.99999.2.4.0",
-    "Amps_Iavg": "1.3.6.1.4.1.99999.2.5.0",
-    "RealPower": "1.3.6.1.4.1.99999.3.1.0",
-    "ApparentPower": "1.3.6.1.4.1.99999.3.2.0",
-    "ReactivePower": "1.3.6.1.4.1.99999.3.3.0",
-    "Frequency": "1.3.6.1.4.1.99999.4.1.0",
+    "Volts_Line_AB": f"{BASE_OID}.1.1.0",
+    "Volts_Line_BC": f"{BASE_OID}.1.2.0",
+    "Volts_Line_CA": f"{BASE_OID}.1.3.0",
+    "Volts_Line_avgLL": f"{BASE_OID}.1.4.0",
+    "Volts_Line_AN": f"{BASE_OID}.1.5.0",
+    "Volts_Line_BN": f"{BASE_OID}.1.6.0",
+    "Volts_Line_CN": f"{BASE_OID}.1.7.0",
+    "Volts_Line_avgLN": f"{BASE_OID}.1.8.0",
+    "Amps_IA": f"{BASE_OID}.2.1.0",
+    "Amps_IB": f"{BASE_OID}.2.2.0",
+    "Amps_IC": f"{BASE_OID}.2.3.0",
+    "Amps_IN": f"{BASE_OID}.2.4.0",
+    "Amps_Iavg": f"{BASE_OID}.2.5.0",
+    "RealPower": f"{BASE_OID}.3.1.0",
+    "ApparentPower": f"{BASE_OID}.3.2.0",
+    "ReactivePower": f"{BASE_OID}.3.3.0",
+    "Frequency": f"{BASE_OID}.4.1.0",
 }
 
-def parse_csv_file(file_path):
-    logging.info(f"Parsing CSV file: {file_path}")
-    try:
-        with open(file_path, "r", encoding="utf-8-sig") as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if len(row) == 2:
-                    metric, value = row[0].strip(), row[1].strip()
-                    if metric in METRIC_INDEX_MAP:
-                        METRICS_CACHE[metric] = value
-                        oid = METRIC_INDEX_MAP[metric]
-                        OID_MAP[oid] = value
-        logging.info(f"Successfully loaded {len(METRICS_CACHE)} metrics into memory.")
-    except Exception as e:
-        logging.error(f"Error reading CSV {file_path}: {e}")
+# Served data. parse_csv_file() swaps these references atomically, so readers
+# (SNMP event loop) always see a consistent snapshot even though the file
+# watcher runs on its own thread.
+METRICS_CACHE = {}
+OID_MAP = {}
+OID_LIST = []  # [(oid_tuple, oid_str)], sorted — used for GETNEXT/GETBULK
+
+
+def _oid_tuple(oid_str):
+    return tuple(int(part) for part in oid_str.split("."))
+
+
+def _to_smi_value(value_str):
+    """Convert a CSV string to an SNMP value according to VALUE_SYNTAX."""
+    if VALUE_SYNTAX == "gauge":
+        try:
+            scaled = round(float(value_str) * 100)
+            if scaled < 0:
+                return v2c.Integer32(scaled)
+            return v2c.Gauge32(scaled)
+        except (ValueError, OverflowError):
+            pass
+    return v2c.OctetString(value_str)
+
+
+def parse_csv_file(file_path, attempts=5, delay=0.5):
+    """Parse a CSV report and atomically REPLACE the served metrics.
+
+    Each report is a full snapshot: metrics absent from the new file stop
+    being served instead of going stale. Retries briefly when nothing is
+    parsed, because watchdog fires on_created before writers finish.
+    Returns the number of metrics loaded.
+    """
+    metrics = {}
+    for attempt in range(attempts):
+        metrics = {}
+        try:
+            with open(file_path, "r", encoding="utf-8-sig") as f:
+                for row in csv.reader(f):
+                    if len(row) == 2:
+                        metric, value = row[0].strip(), row[1].strip()
+                        if metric in METRIC_INDEX_MAP:
+                            metrics[metric] = value
+        except OSError as e:
+            logging.warning(f"Cannot read {file_path}: {e}")
+        if metrics:
+            break
+        if attempt < attempts - 1:
+            time.sleep(delay)
+
+    if not metrics:
+        logging.error(f"No known metrics parsed from {file_path}; keeping previous data")
+        return 0
+
+    global METRICS_CACHE, OID_MAP, OID_LIST
+    oid_map = {METRIC_INDEX_MAP[m]: v for m, v in metrics.items()}
+    METRICS_CACHE = metrics
+    OID_MAP = oid_map
+    OID_LIST = sorted((_oid_tuple(o), o) for o in oid_map)
+    logging.info(f"Loaded {len(metrics)} metrics from {os.path.basename(file_path)} (previous data replaced)")
+    return len(metrics)
+
 
 class ReportFileHandler(FileSystemEventHandler):
+    def _maybe_parse(self, path):
+        if path.endswith(".csv"):
+            parse_csv_file(path)
+
     def on_created(self, event):
-        if not event.is_directory and event.src_path.endswith(".csv"):
-            parse_csv_file(event.src_path)
+        if not event.is_directory:
+            self._maybe_parse(event.src_path)
+
+    def on_modified(self, event):
+        if not event.is_directory:
+            self._maybe_parse(event.src_path)
+
+    def on_moved(self, event):
+        if not event.is_directory:
+            self._maybe_parse(event.dest_path)
+
 
 class DynamicMibController(instrum.AbstractMibInstrumController):
-    def read_variables(self, *varBinds, **context):
+    def read_variables(self, *var_binds, **context):
         res = []
-        for oid_val in varBinds:
-            oid, val = oid_val[0], oid_val[1]
+        for oid, _val in var_binds:
             oid_str = str(oid)
-            logging.debug(f"read_variables: oid={oid_str!r}")
-            if oid_str in OID_MAP:
-                value_str = OID_MAP[oid_str]
-                res.append((oid, v2c.OctetString(value_str)))
+            value_str = OID_MAP.get(oid_str)
+            if value_str is not None:
+                res.append((oid, _to_smi_value(value_str)))
             else:
                 logging.debug(f"read_variables: OID {oid_str!r} not found")
                 res.append((oid, exval.noSuchInstance))
         return res
+
+    def read_next_variables(self, *var_binds, **context):
+        res = []
+        for oid, _val in var_binds:
+            oid_tuple = _oid_tuple(str(oid))
+            next_entry = next((e for e in OID_LIST if e[0] > oid_tuple), None)
+            if next_entry is None:
+                res.append((oid, exval.endOfMibView))
+            else:
+                next_tuple, next_str = next_entry
+                res.append((v2c.ObjectIdentifier(next_tuple), _to_smi_value(OID_MAP[next_str])))
+        return res
+
 
 SAMPLE_CSV = """Main Switch Board,Value
 Volts_Line_AB,120.5
@@ -102,7 +192,14 @@ Frequency,60.0
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
 
-api = FastAPI(title="SNMP Agent", version="1.0.0")
+api = FastAPI(title="SNMP Agent", version="1.1.0")
+
+_SAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+
+
+async def require_api_key(x_api_key: Optional[str] = Header(default=None)):
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key header")
 
 
 @api.get("/health")
@@ -121,29 +218,40 @@ async def list_metrics():
     }
 
 
-@api.post("/upload")
+@api.post("/upload", dependencies=[Depends(require_api_key)])
 async def upload_csv(file: UploadFile = File(...)):
-    """Upload a CSV report. Replaces existing data with the new file's metrics."""
-    if not file.filename or not file.filename.endswith(".csv"):
+    """Upload a CSV report. Replaces all served data with the new file's metrics."""
+    if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(400, "Only .csv files are accepted")
+
+    # Strip any directory components and unsafe characters (path traversal guard)
+    safe_name = _SAFE_CHARS.sub("_", os.path.basename(file.filename))
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(400, "Invalid file name")
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"File exceeds {MAX_UPLOAD_BYTES} bytes")
 
     os.makedirs(WATCH_DIRECTORY, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    save_path = os.path.join(WATCH_DIRECTORY, f"upload-{timestamp}-{file.filename}")
+    save_path = os.path.join(WATCH_DIRECTORY, f"upload-{timestamp}-{safe_name}")
 
-    content = await file.read()
     with open(save_path, "wb") as f:
         f.write(content)
 
     # Parse directly so the caller gets immediate feedback
-    parse_csv_file(save_path)
+    parsed = parse_csv_file(save_path)
+    if parsed == 0:
+        raise HTTPException(422, "CSV contained no known metrics; existing data was kept")
 
     return {
         "status": "ok",
         "file": file.filename,
         "saved_as": save_path,
-        "metrics_loaded": len(METRICS_CACHE),
+        "metrics_loaded": parsed,
     }
+
 
 def load_most_recent_file(folder):
     csv_files = glob.glob(os.path.join(folder, "*.csv"))
@@ -157,9 +265,13 @@ def load_most_recent_file(folder):
             f.write(SAMPLE_CSV)
         parse_csv_file(sample_path)
 
+
 async def main():
     os.makedirs(WATCH_DIRECTORY, exist_ok=True)
     load_most_recent_file(WATCH_DIRECTORY)
+
+    if not API_KEY:
+        logging.warning("API_KEY is not set — POST /upload is UNAUTHENTICATED. Set API_KEY in production.")
 
     event_handler = ReportFileHandler()
     observer = Observer()
@@ -178,28 +290,31 @@ async def main():
     config.add_transport(
         snmp_engine,
         udp.DOMAIN_NAME,
-        udp.UdpTransport().open_server_mode(("0.0.0.0", 10161))
+        udp.UdpTransport().open_server_mode(("0.0.0.0", SNMP_PORT))
     )
 
     config.add_v3_user(
         snmp_engine,
-        userName="snmpv3user",
+        userName=SNMPV3_USER,
         authProtocol=config.USM_AUTH_HMAC96_SHA,
-        authKey="AuthSecretKey123",
+        authKey=SNMPV3_AUTH_KEY,
         privProtocol=config.USM_PRIV_CFB128_AES,
-        privKey="PrivSecretKey123"
+        privKey=SNMPV3_PRIV_KEY
     )
 
     config.add_context(snmp_engine, "")
-    config.add_vacm_group(snmp_engine, "v3group", 3, "snmpv3user")
+    config.add_vacm_group(snmp_engine, "v3group", 3, SNMPV3_USER)
     config.add_vacm_access(snmp_engine, "v3group", "", 3, 3, "exact", "readView", "", "")
     config.add_vacm_view(snmp_engine, "readView", "included", BASE_OID, "")
 
     snmp_context = context.SnmpContext(snmp_engine)
     cmdrsp.GetCommandResponder(snmp_engine, snmp_context)
+    cmdrsp.NextCommandResponder(snmp_engine, snmp_context)
+    cmdrsp.BulkCommandResponder(snmp_engine, snmp_context)
     snmp_context.get_mib_instrum = lambda ctxName=b"": DynamicMibController()
 
-    logging.info("SNMPv3 Server listening on UDP 0.0.0.0:10161...")
+    logging.info(f"SNMPv3 Server listening on UDP 0.0.0.0:{SNMP_PORT}...")
+    logging.info(f"Serving {len(OID_MAP)} metrics under {BASE_OID} (syntax: {VALUE_SYNTAX})")
 
     try:
         while True:
@@ -207,12 +322,14 @@ async def main():
     except asyncio.CancelledError:
         observer.stop()
         observer.join()
+        raise
+
 
 if __name__ == "__main__":
     import uvicorn
 
     # Run SNMP agent + FastAPI in the same event loop
-    uvicorn_cfg = uvicorn.Config(api, host="0.0.0.0", port=8000, log_config=None)
+    uvicorn_cfg = uvicorn.Config(api, host="0.0.0.0", port=API_PORT, log_config=None)
     server = uvicorn.Server(uvicorn_cfg)
 
     async def run_all():
