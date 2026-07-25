@@ -114,6 +114,34 @@ snmpwalk -v3 \
 
 ---
 
+## OID Reference
+
+All metrics are served under `BASE_OID` (default `1.3.6.1.4.1.99999`) as scalar instances (ending in `.0`). If you change `BASE_OID`, only the prefix changes — the last three arcs stay the same.
+
+| Metric              | OID (default prefix)          | Description                    |
+| ------------------- | ----------------------------- | ------------------------------ |
+| `Volts_Line_AB`     | `1.3.6.1.4.1.99999.1.1.0`     | Voltage, phase A–B (V)         |
+| `Volts_Line_BC`     | `1.3.6.1.4.1.99999.1.2.0`     | Voltage, phase B–C (V)         |
+| `Volts_Line_CA`     | `1.3.6.1.4.1.99999.1.3.0`     | Voltage, phase C–A (V)         |
+| `Volts_Line_avgLL`  | `1.3.6.1.4.1.99999.1.4.0`     | Average line-to-line voltage   |
+| `Volts_Line_AN`     | `1.3.6.1.4.1.99999.1.5.0`     | Voltage, phase A–neutral (V)   |
+| `Volts_Line_BN`     | `1.3.6.1.4.1.99999.1.6.0`     | Voltage, phase B–neutral (V)   |
+| `Volts_Line_CN`     | `1.3.6.1.4.1.99999.1.7.0`     | Voltage, phase C–neutral (V)   |
+| `Volts_Line_avgLN`  | `1.3.6.1.4.1.99999.1.8.0`     | Average line-to-neutral voltage|
+| `Amps_IA`           | `1.3.6.1.4.1.99999.2.1.0`     | Current, phase A (A)           |
+| `Amps_IB`           | `1.3.6.1.4.1.99999.2.2.0`     | Current, phase B (A)           |
+| `Amps_IC`           | `1.3.6.1.4.1.99999.2.3.0`     | Current, phase C (A)           |
+| `Amps_IN`           | `1.3.6.1.4.1.99999.2.4.0`     | Neutral current (A)            |
+| `Amps_Iavg`         | `1.3.6.1.4.1.99999.2.5.0`     | Average phase current (A)      |
+| `RealPower`         | `1.3.6.1.4.1.99999.3.1.0`     | Real (active) power (W)        |
+| `ApparentPower`     | `1.3.6.1.4.1.99999.3.2.0`     | Apparent power (VA)            |
+| `ReactivePower`     | `1.3.6.1.4.1.99999.3.3.0`     | Reactive power (VAR)           |
+| `Frequency`         | `1.3.6.1.4.1.99999.4.1.0`     | Line frequency (Hz)            |
+
+Values are `OctetString` by default (e.g. `"611.31"`). With `SNMP_VALUE_SYNTAX=gauge` they are served as `Gauge32` scaled ×100 (e.g. `61131`).
+
+---
+
 ## HTTP API
 
 | Endpoint      | Method | Auth                | Description                          |
