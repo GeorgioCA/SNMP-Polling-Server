@@ -92,6 +92,8 @@ OID_MAP = {}
 OID_LIST = []  # [(oid_tuple, oid_str)], sorted — used for GETNEXT/GETBULK
 OID_REGISTRY = {}  # dynamic metric name -> oid str, persisted to disk
 CURRENT_FILE = None  # path of the CSV whose data is currently being served
+CURRENT_FILE_LOADED_AT = None  # epoch seconds when CURRENT_FILE was parsed
+CURRENT_FILE_MTIME = None  # epoch seconds, filesystem mtime of CURRENT_FILE
 
 
 def load_oid_registry():
@@ -205,12 +207,18 @@ def parse_csv_file(file_path, attempts=5, delay=0.5):
     if registry_changed:
         save_oid_registry()
 
-    global METRICS_CACHE, METRIC_OID_MAP, OID_MAP, OID_LIST, CURRENT_FILE
+    global METRICS_CACHE, METRIC_OID_MAP, OID_MAP, OID_LIST
+    global CURRENT_FILE, CURRENT_FILE_LOADED_AT, CURRENT_FILE_MTIME
     METRICS_CACHE = {m: v for m, v in metrics.items() if m in metric_oids}
     METRIC_OID_MAP = metric_oids
     OID_MAP = {metric_oids[m]: v for m, v in METRICS_CACHE.items()}
     OID_LIST = sorted((_oid_tuple(o), o) for o in OID_MAP)
     CURRENT_FILE = file_path
+    CURRENT_FILE_LOADED_AT = time.time()
+    try:
+        CURRENT_FILE_MTIME = os.path.getmtime(file_path)
+    except OSError:
+        CURRENT_FILE_MTIME = None
     logging.info(f"Loaded {len(METRICS_CACHE)} metrics from {os.path.basename(file_path)} (previous data replaced)")
     return len(METRICS_CACHE)
 
@@ -365,6 +373,8 @@ async def list_metrics():
     return {
         "count": len(METRICS_CACHE),
         "source_file": CURRENT_FILE,
+        "source_file_loaded_at": CURRENT_FILE_LOADED_AT,
+        "source_file_mtime": CURRENT_FILE_MTIME,
         "metrics": {k: {"value": v, "oid": METRIC_OID_MAP.get(k)} for k, v in METRICS_CACHE.items()},
         "oid_map": dict(OID_MAP),
         "dynamic_registry": dict(OID_REGISTRY),
