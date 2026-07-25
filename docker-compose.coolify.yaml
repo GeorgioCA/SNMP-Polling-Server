@@ -22,7 +22,7 @@ services:
       - "8000"
     labels:
       - "caddy=snmp.cohogs.com"
-      - "caddy.reverse_proxy=https://snmp.cohogs.com:8000"
+      - "caddy.reverse_proxy={{upstreams 8000}}"
     networks:
       - coolify
     volumes:
