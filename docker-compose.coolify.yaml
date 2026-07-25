@@ -1,15 +1,40 @@
-# Coolify deployment override — use together with the base file:
-#   docker compose -f docker-compose.yaml -f docker-compose.coolify.yaml up -d
+# Standalone compose file for Coolify deployments.
 #
-# Routes the FastAPI port through Caddy on the external Coolify network.
-# IMPORTANT: set API_KEY in the environment — /upload is otherwise public.
+# In the Coolify UI, set "Docker Compose Location" to:
+#   /docker-compose.coolify.yaml
+# (or use this file alone from the CLI: docker compose -f docker-compose.coolify.yaml up -d)
+#
+# Do NOT combine it with docker-compose.yaml — this file is fully self-contained.
+# Coolify injects COOLIFY_FQDN and attaches the external "coolify" network.
+#
+# IMPORTANT: set API_KEY in Coolify's Environment Variables — /upload is
+# otherwise reachable at your public FQDN without authentication.
 services:
   snmp-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: snmpv3_telemetry_agent
+    restart: unless-stopped
+    ports:
+      - "10161:10161/udp"
+    expose:
+      - "8000"
     labels:
       - "caddy=${COOLIFY_FQDN}"
       - "caddy.reverse_proxy={{upstreams 8000}}"
     networks:
       - coolify
+    volumes:
+      - ./incoming_reports:/app/incoming_reports
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Set these in Coolify's Environment Variables UI (see README → Configuration):
+      # - API_KEY=change-me                # required for POST /upload
+      # - SNMPV3_USER=snmpv3user
+      # - SNMPV3_AUTH_KEY=AuthSecretKey123
+      # - SNMPV3_PRIV_KEY=PrivSecretKey123
+      # - SNMP_VALUE_SYNTAX=gauge          # numeric values as Gauge32 x100
 
 networks:
   coolify:

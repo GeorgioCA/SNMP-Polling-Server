@@ -13,7 +13,7 @@ An automated, lightweight SNMPv3 command responder written in Python. This servi
 ├── run.sh                      # Quick start script (creates venv, installs deps, runs server)
 ├── Dockerfile                  # Container definition
 ├── docker-compose.yaml         # Standalone Docker Compose setup
-├── docker-compose.coolify.yaml # Coolify/Caddy reverse-proxy override
+├── docker-compose.coolify.yaml # Standalone compose for Coolify/Caddy deployments
 ├── incoming_reports/           # Monitored directory for CSV report attachments
 └── README.md                   # Documentation and operational guide
 ```
@@ -48,12 +48,14 @@ The `./incoming_reports` folder on your host machine is mapped directly into the
 
 ### Option 3: Coolify (Caddy reverse proxy)
 
+In the Coolify UI, set **Docker Compose Location** to `/docker-compose.coolify.yaml` — it is a fully self-contained file (do not combine it with the base `docker-compose.yaml`). From the CLI:
+
 ```bash
 docker network create coolify   # once, if it does not exist yet
-docker compose -f docker-compose.yaml -f docker-compose.coolify.yaml up --build -d
+docker compose -f docker-compose.coolify.yaml up --build -d
 ```
 
-> **Warning:** the Coolify override exposes the HTTP API at your public FQDN. Set `API_KEY` (below) or anyone can replace your served metrics.
+> **Warning:** this setup exposes the HTTP API at your public FQDN. Set `API_KEY` (below) in Coolify's Environment Variables, or anyone can replace your served metrics.
 
 ---
 
