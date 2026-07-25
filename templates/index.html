@@ -1,113 +1,128 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SNMP Telemetry Agent</title>
-<style>
-  html { font-size: 19px; }
-  * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
-  header { padding: 0.9rem 1.5rem; background: #1e293b; display: flex; justify-content: space-between; align-items: center; }
-  h1 { font-size: 1.05rem; margin: 0; }
-  .status { font-size: 0.85rem; color: #f87171; }
-  .status.ok { color: #4ade80; }
-  main { display: grid; grid-template-columns: 380px 1fr; gap: 1rem; padding: 1rem 1.5rem; align-items: start; }
-  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
-  .card { background: #1e293b; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem; }
-  .card h2 { margin: 0 0 0.75rem; font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid #334155; }
-  th { color: #94a3b8; font-weight: 600; }
-  td.oid { font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem; color: #7dd3fc; }
-  td.val { font-family: ui-monospace, Consolas, monospace; text-align: right; }
-  tr.changed td.val { color: #4ade80; transition: color 0.3s; }
-  input[type=file], input[type=password] { width: 100%; margin-bottom: 0.6rem; font-size: 0.85rem; }
-  button { background: #2563eb; color: #fff; border: 0; padding: 0.55rem 1rem; border-radius: 0.35rem; cursor: pointer; width: 100%; font-size: 0.9rem; }
-  button:hover { background: #1d4ed8; }
-  .msg { font-size: 0.85rem; margin-top: 0.6rem; white-space: pre-wrap; word-break: break-word; }
-  .msg.ok { color: #4ade80; }
-  .msg.err { color: #f87171; }
-  .muted { color: #64748b; font-size: 0.82rem; }
-  #currentFile { color: #e2e8f0; font-family: ui-monospace, Consolas, monospace; font-size: 0.9rem; word-break: break-all; }
-  #fileMeta { white-space: pre-line; margin-top: 0.4rem; }
-  #serverIp { color: #7dd3fc; font-family: ui-monospace, Consolas, monospace; font-size: 1.15rem; font-weight: 600; word-break: break-all; }
-  #serverMeta { white-space: pre-line; margin-top: 0.4rem; }
-</style>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { darkMode: 'class' };</script>
+<link href="https://cdn.jsdelivr.net/npm/flowbite@3.1.2/dist/flowbite.min.css" rel="stylesheet" />
 </head>
-<body>
-<header>
-  <h1>SNMP Telemetry Agent</h1>
-  <span class="status" id="conn">connecting…</span>
-</header>
-<main>
-  <section>
-    <div class="card">
-      <h2>Upload report</h2>
-      <input type="password" id="apiKey" placeholder="API key (if required)" autocomplete="off">
-      <input type="file" id="file" accept=".csv">
-      <button id="uploadBtn">Upload CSV</button>
-      <div class="msg" id="uploadMsg"></div>
+<body class="bg-gray-900 min-h-screen">
+
+<nav class="bg-gray-800 border-b border-gray-700 px-6 py-3.5 flex items-center justify-between">
+  <span class="text-xl font-semibold text-white">SNMP Telemetry Agent</span>
+  <span id="conn" class="bg-gray-700 text-gray-300 text-sm font-medium px-3 py-1 rounded-full">connecting…</span>
+</nav>
+
+<main class="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-5 p-6 items-start">
+
+  <!-- Left column -->
+  <div>
+    <!-- Upload -->
+    <div class="p-5 mb-5 bg-gray-800 border border-gray-700 rounded-lg shadow">
+      <h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-400">Upload report</h2>
+
+      <label for="apiKey" class="block mb-2 text-sm font-medium text-gray-300">API key (if required)</label>
+      <input type="password" id="apiKey" autocomplete="off" placeholder="••••••••"
+             class="mb-4 bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+
+      <label for="file" class="block mb-2 text-sm font-medium text-gray-300">CSV report</label>
+      <input id="file" type="file" accept=".csv"
+             class="block w-full text-sm text-gray-400 border border-gray-600 rounded-lg cursor-pointer bg-gray-700 focus:outline-none file:mr-4 file:py-2.5 file:px-4 file:border-0 file:text-sm file:font-medium file:bg-gray-600 file:text-gray-200 hover:file:bg-gray-500">
+
+      <button id="uploadBtn" type="button"
+              class="mt-4 w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-800 font-medium rounded-lg text-base px-5 py-2.5">
+        Upload CSV
+      </button>
+      <p id="uploadMsg" class="mt-3 text-sm whitespace-pre-wrap break-words hidden"></p>
     </div>
-    <div class="card">
-      <h2>Current file in use</h2>
-      <div id="currentFile">—</div>
-      <div id="fileMeta" class="muted"></div>
+
+    <!-- Current file -->
+    <div class="p-5 mb-5 bg-gray-800 border border-gray-700 rounded-lg shadow">
+      <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-400">Current file in use</h2>
+      <p id="currentFile" class="font-mono text-base text-gray-100 break-all">—</p>
+      <p id="fileMeta" class="mt-2 text-sm text-gray-400 whitespace-pre-line"></p>
     </div>
-    <div class="card">
-      <h2>Server IP</h2>
-      <div id="serverIp">—</div>
-      <div id="serverMeta" class="muted"></div>
+
+    <!-- Server IP -->
+    <div class="p-5 bg-gray-800 border border-gray-700 rounded-lg shadow">
+      <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-400">Server IP</h2>
+      <p id="serverIp" class="font-mono text-2xl font-semibold text-sky-400 break-all">—</p>
+      <p id="serverMeta" class="mt-2 text-sm text-gray-400 whitespace-pre-line"></p>
     </div>
-  </section>
-  <section class="card">
-    <h2>Live OID table <span class="muted" id="updated"></span></h2>
-    <table>
-      <thead>
-        <tr><th>CSV metric</th><th>OID</th><th style="text-align:right">Value</th></tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </section>
+  </div>
+
+  <!-- Right column: live table -->
+  <div class="p-5 bg-gray-800 border border-gray-700 rounded-lg shadow">
+    <h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-400">
+      Live OID table <span id="updated" class="font-normal normal-case text-gray-500"></span>
+    </h2>
+    <div class="relative overflow-x-auto">
+      <table class="w-full text-base text-left text-gray-300">
+        <thead class="text-sm uppercase bg-gray-700 text-gray-400">
+          <tr>
+            <th scope="col" class="px-4 py-3">CSV metric</th>
+            <th scope="col" class="px-4 py-3">OID</th>
+            <th scope="col" class="px-4 py-3 text-right">Value</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
 </main>
+
+<script src="https://cdn.jsdelivr.net/npm/flowbite@3.1.2/dist/flowbite.min.js"></script>
 <script>
 const keyInput = document.getElementById('apiKey');
 keyInput.value = localStorage.getItem('apiKey') || '';
 keyInput.addEventListener('change', () => localStorage.setItem('apiKey', keyInput.value));
 
+const MSG_OK = ['text-green-400'], MSG_ERR = ['text-red-400'], MSG_MUTED = ['text-gray-400'];
+
+function setMsg(el, text, classes) {
+  el.textContent = text;
+  el.classList.remove('hidden', 'text-green-400', 'text-red-400', 'text-gray-400');
+  el.classList.add(...classes);
+}
+
 document.getElementById('uploadBtn').addEventListener('click', async () => {
   const f = document.getElementById('file').files[0];
   const msg = document.getElementById('uploadMsg');
-  if (!f) { msg.className = 'msg err'; msg.textContent = 'Choose a .csv file first.'; return; }
+  if (!f) { setMsg(msg, 'Choose a .csv file first.', MSG_ERR); return; }
   const fd = new FormData();
   fd.append('file', f);
   const headers = {};
   if (keyInput.value) headers['X-API-Key'] = keyInput.value;
-  msg.className = 'msg muted'; msg.textContent = 'Uploading…';
+  setMsg(msg, 'Uploading…', MSG_MUTED);
   try {
     const r = await fetch('/upload', { method: 'POST', headers, body: fd });
     const d = await r.json();
     if (r.ok) {
-      msg.className = 'msg ok';
-      msg.textContent = `Uploaded ${d.file} — ${d.metrics_loaded} metrics now served.`;
+      setMsg(msg, `Uploaded ${d.file} — ${d.metrics_loaded} metrics now served.`, MSG_OK);
       refresh();
     } else {
-      msg.className = 'msg err';
-      msg.textContent = d.detail || ('HTTP ' + r.status);
+      setMsg(msg, d.detail || ('HTTP ' + r.status), MSG_ERR);
     }
   } catch (e) {
-    msg.className = 'msg err'; msg.textContent = String(e);
+    setMsg(msg, String(e), MSG_ERR);
   }
 });
+
+function setConn(ok) {
+  const conn = document.getElementById('conn');
+  conn.classList.remove('bg-gray-700', 'text-gray-300', 'bg-green-800', 'text-green-300', 'bg-red-800', 'text-red-300');
+  if (ok) { conn.textContent = 'connected'; conn.classList.add('bg-green-800', 'text-green-300'); }
+  else { conn.textContent = 'disconnected'; conn.classList.add('bg-red-800', 'text-red-300'); }
+}
 
 let prev = {};
 async function refresh() {
   try {
     const r = await fetch('/metrics');
     const d = await r.json();
-    const conn = document.getElementById('conn');
-    conn.textContent = 'connected';
-    conn.className = 'status ok';
+    setConn(true);
 
     document.getElementById('currentFile').textContent =
       d.source_file ? d.source_file.split(/[\\/]/).pop() : '—';
@@ -131,25 +146,28 @@ async function refresh() {
     const tbody = document.getElementById('rows');
     tbody.innerHTML = '';
     for (const row of rows) {
-      const tr = document.createElement('tr');
-      if (prev[row.oid] !== undefined && prev[row.oid] !== row.value) tr.className = 'changed';
+      const changed = prev[row.oid] !== undefined && prev[row.oid] !== row.value;
       prev[row.oid] = row.value;
+      const tr = document.createElement('tr');
+      tr.className = 'border-b border-gray-700 hover:bg-gray-700/50';
       const tdName = document.createElement('td');
-      const tdOid = document.createElement('td');
-      const tdVal = document.createElement('td');
+      tdName.className = 'px-4 py-2.5 font-medium text-white';
       tdName.textContent = row.name;
-      tdOid.textContent = row.oid; tdOid.className = 'oid';
-      tdVal.textContent = row.value; tdVal.className = 'val';
+      const tdOid = document.createElement('td');
+      tdOid.className = 'px-4 py-2.5 font-mono text-sm text-sky-400';
+      tdOid.textContent = row.oid;
+      const tdVal = document.createElement('td');
+      tdVal.className = 'px-4 py-2.5 font-mono text-right' + (changed ? ' text-green-400' : '');
+      tdVal.textContent = row.value;
       tr.append(tdName, tdOid, tdVal);
       tbody.appendChild(tr);
     }
     document.getElementById('updated').textContent = '· updated ' + new Date().toLocaleTimeString();
   } catch (e) {
-    const conn = document.getElementById('conn');
-    conn.textContent = 'disconnected';
-    conn.className = 'status';
+    setConn(false);
   }
 }
+
 async function fetchServer() {
   try {
     const r = await fetch('/health');
@@ -163,9 +181,9 @@ async function fetchServer() {
     document.getElementById('serverMeta').textContent = lines.join('\n');
   } catch (e) { /* leave previous values */ }
 }
+
 fetchServer();
 setInterval(fetchServer, 30000);
-
 refresh();
 setInterval(refresh, 3000);
 </script>
