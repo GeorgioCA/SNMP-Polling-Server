@@ -4,8 +4,10 @@ import csv
 import glob
 import json
 import time
+import socket
 import logging
 import asyncio
+import urllib.request
 from datetime import datetime
 from typing import Optional
 
@@ -44,6 +46,11 @@ API_KEY = os.environ.get("API_KEY")
 VALUE_SYNTAX = os.environ.get("SNMP_VALUE_SYNTAX", "string").lower()
 
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+
+# IP shown on the dashboard as "the server's IP" (e.g. the host LAN IP your NMS
+# polls). Auto-detected when unset — inside Docker that falls back to the
+# container/public IP, so set this explicitly in production.
+SERVER_IP = os.environ.get("SERVER_IP")
 
 METRIC_INDEX_MAP = {
     "Volts_Line_AB": f"{BASE_OID}.1.1.0",
@@ -272,6 +279,43 @@ ReactivePower,1200
 Frequency,60.0
 """
 
+# ── Server info helpers (dashboard) ──────────────────────────────────────────
+
+_PUBLIC_IP_CACHE = {"value": None, "ts": 0.0}
+
+
+def _get_local_ips():
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127."):
+                ips.add(ip)
+    except OSError:
+        pass
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))  # no traffic is actually sent
+            ips.add(s.getsockname()[0])
+    except OSError:
+        pass
+    return sorted(ips)
+
+
+def _fetch_public_ip():
+    """Best-effort public IP lookup, cached for 5 minutes (failures included)."""
+    now = time.time()
+    if now - _PUBLIC_IP_CACHE["ts"] < 300:
+        return _PUBLIC_IP_CACHE["value"]
+    try:
+        with urllib.request.urlopen("https://api.ipify.org", timeout=2) as r:
+            ip = r.read().decode().strip() or None
+    except Exception:
+        ip = None
+    _PUBLIC_IP_CACHE.update(value=ip, ts=now)
+    return ip
+
+
 # ── FastAPI app ──────────────────────────────────────────────────────────────
 
 api = FastAPI(title="SNMP Agent", version="1.1.0")
@@ -295,12 +339,23 @@ async def require_api_key(x_api_key: Optional[str] = Header(default=None)):
 
 @api.get("/health")
 async def health():
-    """Health check."""
+    """Health check + server identity info for the dashboard."""
+    local_ips = _get_local_ips()
+    public_ip = await asyncio.to_thread(_fetch_public_ip)
+    advertised = SERVER_IP or public_ip or (local_ips[0] if local_ips else None)
     return {
         "status": "ok",
         "metrics_loaded": len(METRICS_CACHE),
         "watch_dir": WATCH_DIRECTORY,
         "source_file": CURRENT_FILE,
+        "server": {
+            "hostname": socket.gethostname(),
+            "ip": advertised,
+            "ip_source": "env" if SERVER_IP else ("public" if public_ip else "local"),
+            "local_ips": local_ips,
+            "public_ip": public_ip,
+            "snmp_port": SNMP_PORT,
+        },
     }
 
 

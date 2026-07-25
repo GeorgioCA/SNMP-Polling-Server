@@ -29,6 +29,8 @@
   .msg.err { color: #f87171; }
   .muted { color: #64748b; font-size: 0.82rem; }
   #currentFile { color: #e2e8f0; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; word-break: break-all; }
+  #serverIp { color: #7dd3fc; font-family: ui-monospace, Consolas, monospace; font-size: 1.15rem; font-weight: 600; word-break: break-all; }
+  #serverMeta { white-space: pre-line; margin-top: 0.4rem; }
 </style>
 </head>
 <body>
@@ -49,6 +51,11 @@
       <h2>Current file in use</h2>
       <div id="currentFile">—</div>
       <div id="fileMeta" class="muted"></div>
+    </div>
+    <div class="card">
+      <h2>Server IP</h2>
+      <div id="serverIp">—</div>
+      <div id="serverMeta" class="muted"></div>
     </div>
   </section>
   <section class="card">
@@ -136,6 +143,22 @@ async function refresh() {
     conn.className = 'status';
   }
 }
+async function fetchServer() {
+  try {
+    const r = await fetch('/health');
+    const d = await r.json();
+    const s = d.server || {};
+    document.getElementById('serverIp').textContent = s.ip || '—';
+    const lines = ['SNMP: udp/' + (s.snmp_port || 10161), 'host: ' + (s.hostname || '—')];
+    if (s.public_ip) lines.push('public: ' + s.public_ip);
+    if (s.local_ips && s.local_ips.length) lines.push('local: ' + s.local_ips.join(', '));
+    if (s.ip_source === 'env') lines.push('(set via SERVER_IP env)');
+    document.getElementById('serverMeta').textContent = lines.join('\n');
+  } catch (e) { /* leave previous values */ }
+}
+fetchServer();
+setInterval(fetchServer, 30000);
+
 refresh();
 setInterval(refresh, 3000);
 </script>

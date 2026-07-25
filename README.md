@@ -77,6 +77,7 @@ docker compose -f docker-compose.coolify.yaml up --build -d
 | `DYNAMIC_BRANCH`     | `100`                 | Sub-branch under `BASE_OID` for auto-assigned OIDs of unknown metrics |
 | `MAX_DYNAMIC_OIDS`   | `1000`                | Maximum number of dynamically assigned metric OIDs                 |
 | `OID_REGISTRY_PATH`  | `./incoming_reports/oid_registry.json` | Where dynamic OID assignments are persisted       |
+| `SERVER_IP`          | *(auto-detect)*     | IP advertised on the dashboard (set to the host LAN IP your NMS polls — inside Docker, auto-detection only sees the container/public IP) |
 
 Each uploaded/dropped CSV is a **full snapshot**: metrics missing from the newest file stop being served rather than going stale.
 
