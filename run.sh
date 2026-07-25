@@ -30,8 +30,8 @@ source "$VENV_DIR/bin/activate"
 echo "[+] Upgrading pip and essential build tools..."
 python -m pip install --upgrade pip setuptools wheel --quiet
 
-echo "[+] Checking and updating dependencies (pysnmp, watchdog)..."
-pip install --upgrade pysnmp watchdog --quiet
+echo "[+] Installing pinned dependencies from requirements.txt..."
+pip install -r requirements.txt --quiet
 
 echo "--------------------------------------------------"
 echo "[+] Dependencies up to date. Starting SNMP Server..."

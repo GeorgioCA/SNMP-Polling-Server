@@ -1,0 +1,6 @@
+pysnmp==7.1.27
+watchdog==6.0.0
+fastapi==0.140.0
+uvicorn==0.51.0
+python-multipart==0.0.32
+cryptography==49.0.0
