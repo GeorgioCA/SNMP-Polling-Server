@@ -2,7 +2,7 @@
 
 An automated, lightweight SNMPv3 command responder written in Python. This service listens for incoming CSV telemetry report attachments, parses updated metrics in real time, and serves them to Network Management Systems (NMS) via SNMPv3 (GET, GETNEXT/walk and GETBULK supported).
 
-<img src="SNMP%20Telemetry%20Agent.png" alt="SNMP Telemetry Agent" width="600">
+<img src="SNMP%20Telemetry%20Agent.png" alt="SNMP Telemetry Agent" width="800">
 
 ---
 
